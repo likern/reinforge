@@ -1,6 +1,17 @@
 [package]
 name = "reinforge"
 version = "0.1.0"
+rust-version = "1.92"
 edition = "2024"
 
 [dependencies]
+charton = { version = "0.5.0", features = ["resvg"]}
+comfy-table = "7.2.2"
+plotly = { version = "0.14.1", features = ["image", "plotly_embed_js", "static_export_default"] }
+polars = { version = "0.53.0", features = ["lazy"] }
+rand = "0.10.1"
+rand_chacha = "0.10.0"
+rand_distr = "0.6.0"
+serde = "1.0.228"
+serde_json = "1.0.149"
+thiserror = "2.0.18"
