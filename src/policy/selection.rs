@@ -2,8 +2,8 @@ use crate::{arm::ActionID, bandit::model::ActionEstimate};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionReason {
-    Greedy,
-    TieBreak,
+    Greedy(GreedyReason),
+    
     EpsilonExplore,
     Ucb,
 }
@@ -11,8 +11,12 @@ pub enum SelectionReason {
 impl SelectionReason {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Greedy => "greedy",
-            Self::TieBreak => "tie_break",
+            Self::Greedy(greedy) => {
+                match greedy {
+                    GreedyReason::UniqueBest => "best_greedy",
+                    GreedyReason::RandomTieBreak => "tie_break_greedy",
+                }
+            },
             Self::EpsilonExplore => "epsilon_explore",
             Self::Ucb => "ucb",
         }
@@ -41,4 +45,22 @@ impl SelectionDecision {
             reason,
         }
     }
+}
+
+impl From<GreedyReason> for SelectionReason {
+    fn from(reason: GreedyReason) -> Self {
+        SelectionReason::Greedy(reason)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GreedyReason {
+    UniqueBest,
+    RandomTieBreak
+}
+
+#[derive(Debug, Clone)]
+pub struct GreedyDecision {
+    pub action: ActionID,
+    pub reason: GreedyReason,
 }

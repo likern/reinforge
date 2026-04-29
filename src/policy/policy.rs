@@ -3,7 +3,10 @@ use rand::{Rng, RngExt};
 use crate::{
     arm::ActionID,
     bandit::model::{ActionEstimate, ActionValueModel},
-    policy::selection::{SelectionDecision, SelectionReason},
+    policy::{
+        epsilon::GreedyEvaluator,
+        selection::{SelectionDecision, SelectionReason},
+    },
 };
 
 const EPS: f64 = 1e-12;
@@ -36,38 +39,14 @@ impl Policy for GreedyPolicy {
         model: &ActionValueModel,
         rng: &mut R,
     ) -> SelectionDecision {
+        let greedy_eval = GreedyEvaluator::new(model);
+        let partition = greedy_eval.partition();
+
+        let greedy_decision = greedy_eval.random_greedy(&partition.greedy, rng);
+        let action = greedy_decision.action;
+        let reason = SelectionReason::Greedy(greedy_decision.reason);
+
         let q_values = model.q_values();
-
-        let max_estimate = q_values
-            .iter()
-            .copied()
-            .reduce(f64::max)
-            .expect("ActionValueModel should contain at least one q-value");
-
-        let greedy_actions: Vec<ActionID> = q_values
-            .iter()
-            .enumerate()
-            .filter_map(|(action_id, estimate)| {
-                let diff = (*estimate - max_estimate).abs();
-
-                if diff <= EPS { Some(action_id) } else { None }
-            })
-            .collect();
-
-        debug_assert!(
-            !greedy_actions.is_empty(),
-            "there should be at least one greedy action"
-        );
-
-        let idx = rng.random_range(0..greedy_actions.len());
-        let action = greedy_actions[idx];
-
-        let reason = if greedy_actions.len() == 1 {
-            SelectionReason::Greedy
-        } else {
-            SelectionReason::TieBreak
-        };
-
-        SelectionDecision::new(action, q_values.to_vec(), greedy_actions, reason)
+        SelectionDecision::new(action, q_values.to_vec(), partition.greedy, reason)
     }
 }

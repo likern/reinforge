@@ -2,6 +2,8 @@ use rand::Rng;
 use rand::RngExt;
 
 use crate::bandit::model::ActionEstimate;
+use crate::policy::selection::GreedyDecision;
+use crate::policy::selection::GreedyReason;
 use crate::{
     arm::ActionID,
     bandit::model::ActionValueModel,
@@ -23,18 +25,12 @@ impl EpsilonGreedyPolicy {
     }
 }
 
-pub struct GreedyAction {
-    pub max: ActionEstimate,
-    pub ids: Vec<ActionID>,
-}
-
-pub struct EpsilonAction {
-    pub ids: Vec<ActionID>,
-}
+pub type GreedyActionID = ActionID;
+pub type EpsilonActionID = ActionID;
 
 pub struct Partition {
-    pub greedy: GreedyAction,
-    pub epsilon: EpsilonAction,
+    pub greedy: Vec<GreedyActionID>,
+    pub epsilon: Vec<EpsilonActionID>,
 }
 
 pub struct GreedyEvaluator<'a> {
@@ -60,12 +56,6 @@ impl<'a> GreedyEvaluator<'a> {
         let max = self.max();
         let q_values = self.model.q_values();
 
-        // let is_greedy = |id: &ActionID| {
-        //     let q_value = q_values[*id];
-        //     let diff = (q_value - max).abs();
-        //     diff <= EPS
-        // };
-
         let is_greedy = |id: &ActionID| {
             let q_value = q_values[*id];
             q_value == max
@@ -78,12 +68,30 @@ impl<'a> GreedyEvaluator<'a> {
             action_range.partition(is_greedy);
 
         Partition {
-            greedy: GreedyAction {
-                max: max,
-                ids: greedy_ids,
-            },
-            epsilon: EpsilonAction { ids: epsilon_ids },
+            greedy: greedy_ids,
+            epsilon: epsilon_ids,
         }
+    }
+
+    pub fn random_greedy<R: Rng + ?Sized>(
+        &self,
+        greedy_ids: &[ActionID],
+        rng: &mut R,
+    ) -> GreedyDecision {
+        debug_assert!(
+            !greedy_ids.is_empty(),
+            "greedy_ids should be non-empty because greedy action selection requires at least one candidate"
+        );
+        let idx = rng.random_range(0..greedy_ids.len());
+        let action = greedy_ids[idx];
+
+        let reason = if greedy_ids.len() == 1 {
+            GreedyReason::RandomTieBreak
+        } else {
+            GreedyReason::UniqueBest
+        };
+
+        GreedyDecision { action, reason }
     }
 }
 
@@ -93,57 +101,36 @@ impl Policy for EpsilonGreedyPolicy {
         model: &ActionValueModel,
         rng: &mut R,
     ) -> SelectionDecision {
-        let q_values = model.q_values();
-        let epsilon = self.epsilon;
-
-        let max_estimate = q_values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-
-        let greedy_actions: Vec<ActionID> = q_values
-            .iter()
-            .enumerate()
-            .filter_map(|(action_id, estimate)| {
-                let diff = (*estimate - max_estimate).abs();
-
-                if diff <= EPS { Some(action_id) } else { None }
-            })
-            .collect();
-
-        debug_assert!(
-            !greedy_actions.is_empty(),
-            "there should be at least one greedy action"
-        );
-
-        let action_counts = model.action_counts();
-        let action_range = (0..action_counts.len());
-
         let greedy_eval = GreedyEvaluator::new(model);
         let partition = greedy_eval.partition();
 
-        let (greedy_actions, epsilon_actions): (Vec<ActionID>, Vec<ActionID>) =
-            action_range.partition(is_greedy);
+        let epsilon = self.epsilon;
 
-        // let (greedy_actions, epsilon_actions) = q_values
-        //     .iter()
-        //     .enumerate()
-        //     .partition(|(action_id, estimate)| {
-
-        //     });
-
-        let random_choice = rng.random_range(0.0..1.0);
-
-        if random_choice < epsilon {
-            // Select a random action except greedy actions
-        }
-
-        let idx = rng.random_range(0..greedy_actions.len());
-        let action = greedy_actions[idx];
-
-        let reason = if greedy_actions.len() == 1 {
-            SelectionReason::Greedy
+        let random_choice = if self.epsilon == 0.0f64 {
+            // With epsilon = 0, epsilon-greedy degenerates to pure greedy selection.
+            // Skip the exploration RNG draw so this path matches GreedyPolicy exactly.
+            None
         } else {
-            SelectionReason::TieBreak
+            let random_choice = rng.random_range(0.0..1.0);
+            Some(random_choice)
         };
 
-        SelectionDecision::new(action, q_values.to_vec(), greedy_actions, reason)
+        let (action, reason) = if let Some(random_choice) = random_choice && random_choice < epsilon {
+            // Select a random action except greedy actions
+            let epsilon_actions = partition.epsilon;
+            let idx = rng.random_range(0..epsilon_actions.len());
+            let action = epsilon_actions[idx];
+            let reason = SelectionReason::EpsilonExplore;
+            (action, reason)
+        } else {
+            // Select a greedy action
+            let greedy_decision = greedy_eval.random_greedy(&partition.greedy, rng);
+            let action = greedy_decision.action;
+            let reason = SelectionReason::Greedy(greedy_decision.reason);
+            (action, reason)
+        };
+
+        let q_values = model.q_values();
+        SelectionDecision::new(action, q_values.to_vec(), partition.greedy, reason)
     }
 }
